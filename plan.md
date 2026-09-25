@@ -26,6 +26,15 @@ to exist first.
 
 ## Phase 1 — Structured data (Oracle DB)
 
+**Success bar (confirmed 2026-09-25):** within the 14-table working set, AJSMGPT should be able to
+answer *any* question the data can answer — not scoped to a fixed list of pre-approved question
+families like V1's 7. This is why the pipeline is flat generate-and-validate rather than V1's
+plan/ground/generate: a family-based pipeline caps coverage at whatever families were explicitly
+built; a general SQL-generation approach (LLM sees full schema + quirks, writes SQL directly) is
+what makes "any question" possible. The tradeoff, to watch during eval: broader coverage but each
+answer needs the same "zero wrong answers" bar V1 held — a confident wrong query is worse than a
+refusal, so validation has to catch bad SQL regardless of how novel the question's phrasing is.
+
 ### Decisions made (2026-09-25)
 
 | Decision | Choice | Why |
@@ -57,13 +66,93 @@ the LLM or used at runtime for any other question. Question source: `question_ba
 (real, already-collected phrasings) rather than inventing new ones from scratch.
 
 ### Next steps
-1. Get exact column list for the 14-table working set (schema study has table-level detail;
-   confirm whether column-level DDL is needed beyond what's already documented)
-2. Scaffold `app/` (FastAPI) and `frontend/` (React) skeletons
-3. Get first batch of (question, hand-written SQL) pairs from Tarun to seed the eval set
-4. Build minimal eval harness, run against `qwen3:14b`, establish a baseline pass rate
-5. Iterate based on real failures (same cluster-by-cluster method V1 used, applied to the new
+1. ~~Get exact column list for the 14-table working set~~ — done: pulled the real column-level
+   profile (`reference/working_set_schema.json`, from V1's verified Oracle dictionary dump) for
+   all 14 tables, no re-derivation needed.
+2. ~~Scaffold `app/` (FastAPI)~~ — done: `oracle_client.py`, `sql_safety.py`, `llm_client.py`
+   (all adapted from V1's plumbing, pipeline dependencies stripped), `schema_context.py` (builds
+   the full schema + quirks prompt context from real column data — ~7k tokens, comfortably fits
+   `qwen3:14b`'s window, confirms no RAG needed), `sql_generator.py` (question -> SQL via LLM),
+   `report.py` (deterministic result shaping, no LLM), `main.py` (`/ask`, `/health`). 13 unit
+   tests passing (`scripts/test_sql_safety.py`, `scripts/test_schema_context.py`).
+3. ~~Scaffold `frontend/` (React)~~ — done: Vite + React + TypeScript, Tailwind v4 (class-based
+   dark mode, manual toggle persisted to localStorage, theme applied pre-paint to avoid a flash),
+   `motion` for animation, `recharts` for the chart view. Single-page chat-style UI: question
+   bubbles, animated loading state, table/chart/summary result rendering (matches `report.py`'s
+   `view` field), collapsible "Show SQL". Verified visually in-browser (light + dark, all three
+   result views) against a throwaway mock backend — not yet wired to the real FastAPI backend.
+4. Get first batch of (question, hand-written SQL) pairs from Tarun to seed the eval set —
+   still open, blocking real accuracy measurement
+5. Build minimal eval harness, run against `qwen3:14b`, establish a baseline pass rate
+6. Iterate based on real failures (same cluster-by-cluster method V1 used, applied to the new
    simpler pipeline)
+
+### Verified against live Oracle + Ollama (2026-09-25)
+Deployed to `/home/ajsmgpt/projects/AJSMGPT_v2` on the server (separate from V1 and the legacy
+app — see "Server deployment" below). Ran 5 real questions end-to-end (generate SQL -> validate
+-> execute against real `ajsmgpt_ro` -> real result), fixing real failures as they surfaced
+(`fix.md` #1-5): a COUNT, a date-filtered COUNT, a business-logic-filtered COUNT (supplier),
+a stock SUM, and a ranked join with GROUP BY — all now return correct, verified results with
+no hardcoded queries or templates, only the schema+quirks context. This is the core "any
+question, answered from metadata alone" bar (confirmed 2026-09-25) actually working, not just
+scaffolded.
+
+**Not yet done:** a real held-out eval set (still need Tarun's hand-written SQL for a proper
+answer key — `plan.md` next steps #3-4 below), and the `/ask` HTTP endpoint itself hasn't been
+hit yet (only the internal `generate_sql`/`run_safe_select` functions directly) — still need to
+run `uvicorn` and test through the actual API the frontend calls.
+
+### Live end-to-end test through the real frontend (2026-09-25)
+Ran the actual UI (not the mock) against the real backend on the server (SSH tunnel to port
+8002). Verified: stock aggregation, a ranked supplier join, and — notably — the MRS-pending
+compound anti-join, which the model reproduced correctly (5 flag conditions + a LEFT JOIN NULL
+check) from the schema context alone, the exact case V1 flagged as needing dedicated code.
+Found and fixed one more real bug live: case-sensitive `LIKE` matched 0 rows against real
+(uppercase) data on a name-based question — fixed with an explicit `UPPER()` rule (fix.md #6).
+
+### First formal eval harness (2026-09-25)
+Built `scripts/run_eval.py` + `reference/eval/golden_answers.json` (12 questions across 7
+families, gitignored — contains real business figures). Golden SQL/answers derived by Claude
+and verified directly against live Oracle — same pattern V1 used successfully ("Claude
+generated, grounded against real entities, computed answers directly, confirmed by the
+client"). Pending Tarun's confirmation the golden answers are correct.
+
+**Results across 6 runs, fixing real bugs between each (fix.md #7-#13):**
+7/12 -> 6/12 (dip was the harness's own bug hiding the real SQL, not a regression) -> 11/12 ->
+11/12 (same question, new root cause: date arithmetic) -> 11/12 (date hint present in prompt
+but not attended to) -> **12/12**. Every failure was genuinely diagnosable and fixable at the
+schema-context/prompt level — no case yet where the flat generate-and-validate approach hit a
+wall requiring V1-style dedicated pipeline stages. Notable methodological lesson: putting a
+correct fact in the system prompt is not the same as the model using it — proximity to the
+actual question (user prompt, not just system prompt) mattered more than expected (fix.md #13).
+
+**Caveat on what 12/12 means:** this is 12 hand-picked, unambiguous questions across 7 families
+— a real signal that the approach works, not a claim of general accuracy. The known-hard
+category (ambiguous item names like "keyboard"/"mouse"/"dell system", and "barcode label" which
+matches zero real items despite being a 44x-occurrence real question) is deliberately excluded
+from this batch and still needs its own entity-resolution approach before it can be measured
+fairly. Next: expand the golden set using more of the 223-question bank, including that harder
+category, and get Tarun's confirmation the golden answers themselves are right.
+
+### Answer summaries (2026-09-25)
+Added `app/answer_summary.py`: a second, tightly-scoped LLM call that phrases the *already-
+verified* Oracle result as one plain-language sentence — given the real rows, told never to
+add a fact not in them, explicitly told to state plainly (not guess why) when there are no
+rows. Wired into `/ask`'s response (`summary` field) and the frontend (shown above the
+table/chart/summary view; empty results now show only the sentence, no generic "no rows"
+block). This doubles the LLM calls per question (SQL generation + summary), roughly doubling
+latency — acceptable tradeoff for the UX gain, not yet stress-tested under load.
+
+### Server deployment
+```text
+Code:    /home/ajsmgpt/projects/AJSMGPT_v2   (rsync'd from local, not git-based yet)
+Secrets: /home/ajsmgpt/secrets/ajsmgpt_v2.env (deliberately outside the project directory;
+                                                copied from AJSMGPT_v1's .env, same DB/Ollama)
+Run with: AJSMGPT_ENV_FILE=/home/ajsmgpt/secrets/ajsmgpt_v2.env ./venv/bin/uvicorn app.main:app
+Port:    8002 reserved (8000 = legacy, 8001 = V1, both already running)
+```
+`app/config.py` loads `.env` from `$AJSMGPT_ENV_FILE` if set, else python-dotenv's normal
+cwd/parent search — local dev can still just drop a `.env` in the project root if wanted.
 
 ---
 
