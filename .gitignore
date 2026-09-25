@@ -1,0 +1,21 @@
+# secrets
+.env
+*.env
+!*.env.example
+reference/v1_plumbing/.env
+
+# internal company data (schema details, business questions) — public repo, keep local-only
+reference/
+
+# claude code local settings
+.claude/settings.local.json
+
+# python
+venv/
+__pycache__/
+*.pyc
+
+# node / react
+node_modules/
+dist/
+build/
