@@ -158,20 +158,36 @@ latency — acceptable tradeoff for the UX gain, not yet stress-tested under loa
 Code:    /home/ajsmgpt/projects/AJSMGPT_v2   (rsync'd from local, not git-based yet)
 Secrets: /home/ajsmgpt/secrets/ajsmgpt_v2.env (deliberately outside the project directory;
                                                 copied from AJSMGPT_v1's .env, same DB/Ollama)
-Run with: AJSMGPT_ENV_FILE=/home/ajsmgpt/secrets/ajsmgpt_v2.env ./venv/bin/uvicorn app.main:app
-         --reload   (during iteration — see gotcha below)
 Port:    8002 reserved (8000 = legacy, 8001 = V1, both already running)
 ```
 `app/config.py` loads `.env` from `$AJSMGPT_ENV_FILE` if set, else python-dotenv's normal
 cwd/parent search — local dev can still just drop a `.env` in the project root if wanted.
 
-**Gotcha hit 2026-09-27:** rsync'ing a code fix to the server does NOT update the live running
-`/ask` server — a long-running Python process keeps executing whatever it had in memory at
-import time, even though the `.py` file on disk changed. Confirmed the fix.md #14 fix live via
-direct CLI (fresh Python process each time, correctly picks up the change) while the actual web
-server serving the frontend was still giving the old wrong answer. Fixed by adding `--reload` to
-the run command going forward — real argument for systemd + a documented restart step (or
-`--reload` in dev) once this needs to be someone else's problem too, not just mine to remember.
+**Managed by systemd (user-level, no sudo needed) — 2026-09-27.** Unit at
+`~/.config/systemd/user/ajsmgpt-v2.service` on the server. `Linger=yes` was already enabled for
+the `ajsmgpt` account, so this survives logout and reboot, not just an SSH session ending; the
+legacy app on port 8000, by contrast, turned out to *not* actually be systemd-managed despite
+its docstring name ("ajsmgpt-api.service") — just a raw background process, so this is the
+first real service-managed deployment for this project family.
+```bash
+# after syncing new code, restart to actually pick it up (see gotcha below):
+ssh -p 5555 ajsmgpt@103.171.13.142 "systemctl --user restart ajsmgpt-v2.service"
+# check status / logs:
+ssh -p 5555 ajsmgpt@103.171.13.142 "systemctl --user status ajsmgpt-v2.service"
+ssh -p 5555 ajsmgpt@103.171.13.142 "journalctl --user -u ajsmgpt-v2.service -f"
+```
+`Restart=on-failure` verified for real: killed the process with `kill -9` directly, systemd
+respawned it in under 2 seconds, `/health` was serving again immediately.
+
+**Gotcha (hit 2026-09-27, now solved by the above):** rsync'ing a code fix to the server does
+NOT update the live running `/ask` server — a long-running Python process keeps executing
+whatever it had in memory at import time, even though the `.py` file on disk changed. Confirmed
+the fix.md #14 fix live via direct CLI (fresh Python process each time, correctly picks up the
+change) while the actual web server serving the frontend was still giving the old wrong answer.
+**The fix is discipline, not magic:** every code sync to the server must be followed by
+`systemctl --user restart ajsmgpt-v2.service` before it's live — there is no auto-reload in the
+production unit (deliberately: `--reload`'s file-watcher interacting with systemd's own process
+supervision is more moving parts than just remembering to restart).
 
 ---
 

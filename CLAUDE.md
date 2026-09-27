@@ -56,6 +56,9 @@ ssh -p 5555 ajsmgpt@103.171.13.142      # key-auth, RTX 5070, Ollama 0.30.10
 Ollama models: qwen3:14b (generation), nomic-embed-text (embeddings, held in reserve)
 Oracle: 11g EE 11.2.0.1.0 — no FETCH FIRST, use ROWNUM wrapper for pagination
 Read-only account: ajsmgpt_ro — CREATE SESSION + SELECT on the 14-table working set only
+Code: /home/ajsmgpt/projects/AJSMGPT_v2 · Secrets: /home/ajsmgpt/secrets/ajsmgpt_v2.env
+Service: systemctl --user restart ajsmgpt-v2.service   # after EVERY code sync — see SKILL.md
+Port: 8002 (8000 = legacy, 8001 = V1)
 ```
 14-table working set: `PURCHASEORDER`, `GRN`, `INVOICEGRN`, `ISSUE`, `MRS`, `MRS_TEMP`,
 `ITEMSTOCK`, `INVITEMS`, `PARTYMASTER`, `DEPT`, `UNIT`, `PLACE`, `STATE`, `COUNTRY`. Full detail,

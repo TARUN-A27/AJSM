@@ -327,3 +327,25 @@ Format: date · prompt (short) · what was done · files touched · tests run.
   `fixlog.md` (this entry + backfill)
 - **Tests:** 30/30 unit tests pass locally; 3 real questions re-verified against live Oracle +
   Ollama (2 fixed, 1 confirmed correctly-empty)
+
+### Committed fix.md #14; deployment moved to systemd
+- **Prompt:** "continue with next" — commit today's fix, then move to the other open "next plan"
+  item (deployment stability).
+- **Done:** committed and pushed fix.md #14 (`3487cb5`) — added `graphify-out/` to `.gitignore`
+  first (regenerable build artifact, not source). Then tackled deployment: discovered no sudo
+  access on the server account, and that the legacy app's systemd-sounding service name
+  ("ajsmgpt-api.service") was misleading — it's actually just a raw background process, not
+  systemd-managed at all, so there was no existing pattern to copy this time. Found
+  `Linger=yes` already enabled for the account and `systemctl --user` working, which makes a
+  user-level systemd service fully viable without root. Created
+  `~/.config/systemd/user/ajsmgpt-v2.service` on the server (port 8002, `Restart=on-failure`,
+  reads `AJSMGPT_ENV_FILE` from the same secrets path as before), enabled it, and verified two
+  things for real rather than assuming: (1) killed the process with `kill -9` directly —
+  systemd respawned it in under 2 seconds, `/health` immediately serving again; (2) confirmed no
+  duplicate process ended up bound to the port after switching over from the old manual
+  `setsid nohup` process. Documented the new restart-after-sync workflow in `plan.md`,
+  `SKILL.md`, and `CLAUDE.md` §7, since this changes how every future code change reaches the
+  live server.
+- **Files:** `plan.md`, `SKILL.md`, `CLAUDE.md` (server-side: new systemd unit file, not part of
+  this repo)
+- **Tests:** crash-recovery verified live (kill -9 -> auto-respawn -> health check passing)

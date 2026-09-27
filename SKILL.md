@@ -10,9 +10,13 @@ habits doc, same spirit as V1's discipline (see `reference/` docs) but for this 
    study), a validator gap, a prompt that under-specifies — not just "the LLM was wrong."
 3. Fix the narrowest thing that addresses the root cause, not the specific question's surface
    symptom (same principle as `CLAUDE.md` root-cause-over-symptom guidance).
-4. Re-run the eval set. Confirm the fix moved the failing case and didn't regress others.
-5. Record it: `fix.md` (root cause + fix, one entry per distinct cause), `fixlog.md` (append an
-   entry for the session), `plan.md` (if a decision changed, not just a bug fix).
+4. Sync the fix to the server and **restart the service** (`systemctl --user restart
+   ajsmgpt-v2.service`) before testing live — rsync alone does not update the running process;
+   it keeps executing whatever was in memory at import time (hit for real, plan.md 2026-09-27).
+5. Re-run the eval set. Confirm the fix moved the failing case and didn't regress others.
+6. Record it: `fix.md` (root cause + fix, one entry per distinct cause), `fixlog.md` (append an
+   entry for the session, every prompt, no exceptions — this slipped once already, see the
+   2026-09-27 backfill entry), `plan.md` (if a decision changed, not just a bug fix).
 
 ## Ground rules
 - Never grow the pipeline back toward V1's shape (entity resolution stage, schema grounding
@@ -28,12 +32,23 @@ habits doc, same spirit as V1's discipline (see `reference/` docs) but for this 
   `reference/ORACLE_SCHEMA_STUDY_2026-09-22.md` stays as the historical record — don't fork a
   second copy of schema knowledge.
 
-## Running the eval (once built)
+## Running the eval
 ```bash
 # server only — Oracle/Ollama access is server-side (CLAUDE.md §8)
 ssh -p 5555 ajsmgpt@103.171.13.142
-cd AJSMGPT_v2  # or wherever this repo is pushed
-./venv/bin/python scripts/run_eval.py
+cd /home/ajsmgpt/projects/AJSMGPT_v2
+AJSMGPT_ENV_FILE=/home/ajsmgpt/secrets/ajsmgpt_v2.env PYTHONPATH=. ./venv/bin/python scripts/run_eval.py
+```
+This calls `generate_sql`/`run_safe_select` directly — it does not go through the running
+`/ask` server, so it always reflects whatever's on disk, no restart needed for the eval itself.
+
+## Managing the live service
+Systemd user service (no sudo needed — `Linger=yes` already enabled), survives reboot/logout,
+auto-restarts on crash. Full detail: `plan.md`'s "Server deployment" section.
+```bash
+ssh -p 5555 ajsmgpt@103.171.13.142 "systemctl --user restart ajsmgpt-v2.service"   # after every code sync
+ssh -p 5555 ajsmgpt@103.171.13.142 "systemctl --user status ajsmgpt-v2.service"    # health check
+ssh -p 5555 ajsmgpt@103.171.13.142 "journalctl --user -u ajsmgpt-v2.service -f"    # tail logs
 ```
 
 ## Adding a new query family
