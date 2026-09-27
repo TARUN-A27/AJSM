@@ -232,3 +232,98 @@ Format: date · prompt (short) · what was done · files touched · tests run.
 - **Tests:** 20/20 unit tests pass locally; 4 more questions verified correct live through the
   actual frontend UI against real Oracle + Ollama (total across this session: 9 real questions
   verified end-to-end, 6 real bugs found and fixed)
+
+### Formal eval harness built, 12/12 reached, answer summaries added [backfilled]
+- **Prompt:** "now lets come to the main part..." continuation + "test alll possible question
+  forntnend and show live" + "for each output in the ajsmgpt give summary also if data does not
+  exist five reply in sentnece as if resppned by llm" + "do it" (commit) + "tell me next plan".
+- **Done:** built `scripts/run_eval.py` + `reference/eval/golden_answers.json` (12 questions
+  across 7 families, Claude-derived and Oracle-verified, same pattern V1 used). Six eval runs,
+  fixing a real bug after each (fix.md #7-#13): no anchor for "today" in relative-date
+  questions; "consumed" mapped to the wrong table; wrong schema prefixes on real tables
+  (`SCM.ISSUE` instead of `INVENTORY.ISSUE`); an invented underscore in a column name
+  (`ISSUE_NO` vs real `ISSUENO`); a numeric literal against a VARCHAR2 code column; an
+  over-broad quirk fix that broke a sibling question; and a date range that was correct in the
+  system prompt but not attended to until repeated next to the question in the user prompt.
+  Reached **12/12**. Along the way found and fixed a bug in the harness itself (hardcoded
+  `sql=None` in its own error handler, hiding the real failing SQL) and reworded two golden
+  questions that were genuinely ambiguous ("how many GRNs" — line items vs distinct documents).
+  Added `app/answer_summary.py`: a second LLM call that phrases the already-verified result as
+  one sentence, told never to add a fact not in the data and to state plainly (not guess why)
+  when there are no rows; wired into `/ask`'s `summary` field and the frontend. Deployed to the
+  server (`/home/ajsmgpt/projects/AJSMGPT_v2`, port 8002, `.env` moved outside the project dir
+  to `/home/ajsmgpt/secrets/ajsmgpt_v2.env` per explicit request, `app/config.py` added to load
+  it from there). Verified live through the actual frontend (SSH tunnel to port 8002): a
+  same-theme cluster (supplier count, top-5 ranking, earliest PO date) and a different-theme
+  question (MRS pending) — all matched the eval golden answers exactly, summary sentences
+  correct including for the 5-row ranking case. Committed and pushed everything to
+  `github.com/TARUN-A27/AJSM` (`f331ca3`) — `reference/` stays gitignored (public repo, real
+  internal schema/business data).
+- **Files:** `app/sql_generator.py`, `app/schema_context.py`, `app/answer_summary.py`,
+  `app/main.py`, `app/config.py`, `app/oracle_client.py`, `app/llm_client.py`,
+  `app/sql_safety.py`, `scripts/run_eval.py`, `scripts/test_sql_generator.py`,
+  `scripts/test_answer_summary.py`, `scripts/test_schema_context.py`,
+  `reference/eval/golden_answers.json`, `frontend/src/types.ts`, `frontend/src/App.tsx`,
+  `frontend/src/components/TurnCard.tsx`, `fix.md`, `plan.md`
+- **Tests:** 29/29 unit tests pass locally; 12/12 eval questions pass against live Oracle +
+  Ollama; 4 additional questions verified live through the actual frontend
+
+### Next-plan discussion + ambiguous-entity design brief [backfilled]
+- **Prompt:** "what is the next big plan" -> user specified the design for ambiguous item names
+  ("if they ask just mouse we can show them all if in particular we can show exact product...
+  for do it later, give me brief... no need to dev now").
+- **Done:** proposed two priorities (deployment stability via systemd; the ambiguous-entity
+  problem, since "keyboard"/"mouse"/"dell system" are the *highest-occurrence* real questions in
+  the bank, far more common than the clean exact-code questions the 12/12 batch covered). User
+  gave the design for the latter (exact match -> one answer; ambiguous match -> show all
+  candidates, leaning `GROUP BY` so each gets its own row) but deferred building it. No code
+  changed — documentation/discussion only.
+- **Files:** none
+- **Tests:** none
+
+### Knowledge graph built with graphify; local visualization served
+- **Prompt:** "/graphify" then "i need to visualise the graph give me lcoal host link".
+- **Done:** ran the full graphify pipeline on the project (no existing graph) — 41 files
+  detected (32 code, 8 docs, 1 image), AST extraction (228 nodes/407 edges) run in parallel with
+  two semantic-extraction subagents (8 docs in one chunk, the favicon SVG in its own per the
+  vision-needs-separate-context rule) since no `GEMINI_API_KEY` was set. Merged to 321 nodes/528
+  edges, clustered into 18 communities, labeled each, exported `graph.html` + `GRAPH_REPORT.md`
+  + `graph.json`. Health check flagged 36 dangling-endpoint edges (docs referenced code modules
+  as whole-file concepts; AST creates per-function/class nodes, so some cross-references didn't
+  align to an exact node) — surfaced per the honesty rule, not blocking. Notably, the graph's
+  own "Surprising Connections" analysis independently re-surfaced the fabricated-looking
+  "project marked abandoned" claim from earlier in the project's history as an AMBIGUOUS edge,
+  without being told about it. Served `graphify-out/` over `python3 -m http.server` (added to
+  `.claude/launch.json` as `graphify-viz`, port 4321) so the interactive graph is reachable at
+  `http://localhost:4321/graph.html`.
+- **Files:** `.claude/launch.json` (added `graphify-viz` config), `graphify-out/` (generated,
+  not committed — matches `reference/`'s local-only treatment for anything schema/business-data
+  adjacent, though graphify's own output isn't in `.gitignore` yet — worth adding if this
+  becomes a recurring habit)
+- **Tests:** none (tooling/visualization only)
+
+### Ambiguous-name matching fixed (fix.md #14) [2026-09-27]
+- **Prompt:** "do it" (continuing "today's plan": verify server checkpoint, then tackle the
+  ambiguous-entity problem per the design brief from two sessions ago).
+- **Done:** verified the backend on the server survived the session gap (real `setsid`-detached
+  process, independent of the local session — still running from 2026-09-25). Baseline-tested
+  the two highest-occurrence real questions in the bank before changing anything: "keyboard
+  stock" (62x/38x/5x) and "last supply of mouse" (44x) — both failed exactly as predicted,
+  blindly aggregating across genuinely different products or ignoring the question entirely.
+  Fixed with quirk #16 (`app/schema_context.py`): any name-based (`LIKE`) match must `GROUP BY`
+  the item so each matching product gets its own row — never a blind aggregate. Re-verified:
+  both questions now correctly disaggregate (4 separate keyboard-ish products with individual
+  stock figures; 4 separate mouse-ish products with individual last-issue dates). Also verified
+  the true-zero-match case ("barcode label," a real 44x-occurrence question for an item that
+  doesn't exist under that name) — correct empty result, correctly joined across 3 tables, and
+  `answer_summary` produces an honest "No matching records were found" sentence. Noted one
+  residual, non-bug ambiguity: "last supply" was read as `ISSUE` (issued out) rather than
+  `GRN`/`PURCHASEORDER` (received in) — a defensible reading of genuinely ambiguous business
+  language, left open pending Tarun's input on which the business actually means. Also noticed
+  and backfilled a gap in this file itself — several prior prompts had `plan.md`/`fix.md`
+  updated but no corresponding `fixlog.md` entry, against this project's own "every prompt, no
+  exceptions" rule.
+- **Files:** `app/schema_context.py`, `scripts/test_schema_context.py`, `fix.md`, `plan.md`,
+  `fixlog.md` (this entry + backfill)
+- **Tests:** 30/30 unit tests pass locally; 3 real questions re-verified against live Oracle +
+  Ollama (2 fixed, 1 confirmed correctly-empty)

@@ -174,6 +174,38 @@ diagnose-root-cause-not-symptom method.
   rollover trap) and `test_date_hints_are_repeated_next_to_the_question_not_only_in_system_prompt`
   (would have caught round 1's insufficiency).
 
+## 14. ✅ Ambiguous name matches blindly aggregated across unrelated products
+- **Questions:** "keyboard stock" (62x/38x/5x-occurrence real questions), "last supply of mouse"
+  (44x-occurrence) — the highest-frequency real usage pattern in the question bank, deliberately
+  excluded from the first eval batch specifically because it was expected to be hard (plan.md's
+  "known-hard category").
+- **Symptom:** "keyboard stock" silently `SUM`med across 3 genuinely different real products
+  ("KEYBOARD .W. MOUSE - COMBO", "SEALED KEYBOARD FOR PT3", "KEYBOARD AND MONITOR COVER") into
+  one number (0) — not wrong per se, but misleading: the user has no way to know it was a
+  blended total across unrelated items, or that any of them individually might have stock.
+  "Last supply of mouse" separately just listed raw `ITEM_CODE`s with no attempt at answering
+  "last supply" at all (no date, no aggregation).
+- **Root cause:** nothing in the schema context distinguished an exact ITEM_CODE match (never
+  ambiguous) from a name/`LIKE` match (frequently ambiguous — 407 ITEM_NAMEs are shared across
+  multiple codes, and vague words like "keyboard" match several unrelated products). The model
+  had no instruction to disaggregate.
+- **Fix:** added quirk #16 (`app/schema_context.py`): any name-based match must `GROUP BY`
+  `ITEM_CODE`/`ITEM_NAME` so each matching product gets its own row and its own answer, never a
+  blind aggregate — one row back means the name was effectively unique, several rows means it
+  was ambiguous, and either way showing all matches is correct where guessing one is not.
+  Re-tested live: "keyboard stock" now returns 4 separate rows (each real keyboard-ish product,
+  own stock figure); "last supply of mouse" now returns 4 rows with `MAX(ISSUEDATE)` per item,
+  correctly sorted. Also verified the true-zero-match case ("barcode label", a real 44x-
+  occurrence question for an item that doesn't exist under that name) — correct empty result,
+  correctly qualified 3-table join, and `answer_summary` produces an honest "No matching
+  records were found" sentence rather than a guess. Regression test:
+  `scripts/test_schema_context.py::test_ambiguous_name_matches_require_group_by_not_blind_aggregation`.
+- **Residual, not a bug:** "last supply" was interpreted as `ISSUE` (issued out to a department)
+  rather than `GRN`/`PURCHASEORDER` (received in from a supplier) — a defensible reading of
+  genuinely ambiguous business language, not an entity-resolution failure. Not fixed because
+  there's no clear "correct" interpretation to fix it *to* without asking Tarun which one the
+  business actually means.
+
 ## Harness bugs (not app bugs, but worth recording — same discipline)
 - **`scripts/run_eval.py` hardcoded `sql=None` in its own error handler**, discarding the
   actual generated SQL for every `ERROR`-status question and making #9/#10/#11 impossible to

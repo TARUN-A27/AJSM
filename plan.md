@@ -129,10 +129,20 @@ actual question (user prompt, not just system prompt) mattered more than expecte
 **Caveat on what 12/12 means:** this is 12 hand-picked, unambiguous questions across 7 families
 — a real signal that the approach works, not a claim of general accuracy. The known-hard
 category (ambiguous item names like "keyboard"/"mouse"/"dell system", and "barcode label" which
-matches zero real items despite being a 44x-occurrence real question) is deliberately excluded
-from this batch and still needs its own entity-resolution approach before it can be measured
-fairly. Next: expand the golden set using more of the 223-question bank, including that harder
+matches zero real items despite being a 44x-occurrence real question) was deliberately excluded
+from this batch. Next: expand the golden set using more of the 223-question bank, including this
 category, and get Tarun's confirmation the golden answers themselves are right.
+
+### Ambiguous-name matching (2026-09-27)
+Tarun's design brief: exact match -> one answer; ambiguous match -> show all candidates, don't
+guess (likely `GROUP BY` so each gets its own row rather than blending into one number).
+Baseline-tested the two highest-occurrence real questions in the bank first ("keyboard stock"
+62x/38x/5x, "last supply of mouse" 44x) — both failed exactly as predicted: blind aggregation
+across unrelated products, or no attempt at the actual question. Fixed with quirk #16
+(`app/schema_context.py`) requiring `GROUP BY` on any name-based match (fix.md #14). Re-verified:
+both now disaggregate correctly, and the true-zero-match case ("barcode label") produces a
+correct empty result with an honest summary sentence instead of a guess. This was the real
+accuracy test the 12/12 batch deliberately didn't cover — it now passes too.
 
 ### Answer summaries (2026-09-25)
 Added `app/answer_summary.py`: a second, tightly-scoped LLM call that phrases the *already-
@@ -149,10 +159,19 @@ Code:    /home/ajsmgpt/projects/AJSMGPT_v2   (rsync'd from local, not git-based 
 Secrets: /home/ajsmgpt/secrets/ajsmgpt_v2.env (deliberately outside the project directory;
                                                 copied from AJSMGPT_v1's .env, same DB/Ollama)
 Run with: AJSMGPT_ENV_FILE=/home/ajsmgpt/secrets/ajsmgpt_v2.env ./venv/bin/uvicorn app.main:app
+         --reload   (during iteration — see gotcha below)
 Port:    8002 reserved (8000 = legacy, 8001 = V1, both already running)
 ```
 `app/config.py` loads `.env` from `$AJSMGPT_ENV_FILE` if set, else python-dotenv's normal
 cwd/parent search — local dev can still just drop a `.env` in the project root if wanted.
+
+**Gotcha hit 2026-09-27:** rsync'ing a code fix to the server does NOT update the live running
+`/ask` server — a long-running Python process keeps executing whatever it had in memory at
+import time, even though the `.py` file on disk changed. Confirmed the fix.md #14 fix live via
+direct CLI (fresh Python process each time, correctly picks up the change) while the actual web
+server serving the frontend was still giving the old wrong answer. Fixed by adding `--reload` to
+the run command going forward — real argument for systemd + a documented restart step (or
+`--reload` in dev) once this needs to be someone else's problem too, not just mine to remember.
 
 ---
 

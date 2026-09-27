@@ -90,6 +90,23 @@ Database facts (Oracle 11g EE 11.2.0.1.0 — a 2009-era database):
     writing a literal. A VARCHAR2 code column needs a quoted string literal even when the value
     looks numeric (`SUP_CODE = '800967'`, never `SUP_CODE = 800967`) — Oracle raises ORA-01722
     ("invalid number") if you compare a text column to a bare numeric literal.
+16. A name-based item match (e.g. "keyboard", "mouse", "dell system") can match several
+    genuinely different products — 407 ITEM_NAMEs are shared by more than one ITEM_CODE, and a
+    vague word like "keyboard" matches multiple unrelated items (e.g. "KEYBOARD .W. MOUSE -
+    COMBO", "SEALED KEYBOARD FOR PT3", "KEYBOARD AND MONITOR COVER" are three different
+    products, not one). When a query filters by a name pattern rather than an exact ITEM_CODE:
+    - NEVER blindly aggregate (SUM/COUNT with no GROUP BY) across all matches into one number —
+      that blends unrelated products into a single misleading total.
+    - ALWAYS GROUP BY the item (ITEM_CODE and ITEM_NAME) so each matching product gets its own
+      row with its own answer. One row back means the name was effectively unique; several rows
+      means it was ambiguous — either way, showing all matches is always correct; guessing which
+      one the user meant is not.
+    - This applies to any question shape: a stock question becomes "stock per matching item,"
+      a "last supply of X" becomes "last supply per matching item," a "how much was issued for
+      X" becomes "issued qty per matching item," etc. Include ITEM_NAME in the SELECT list so
+      the distinct products are visible to the user, not just codes.
+    - An exact ITEM_CODE (not a name) is never ambiguous — this rule only applies to name/LIKE
+      matches.
 
 Verified business definitions (reverse-engineered from the ERP's own PL/SQL — safe to rely on):
 - PO pending approval stage: on a PURCHASEORDER row, JMDORDERAPPROVAL/SOORDERAPPROVAL/

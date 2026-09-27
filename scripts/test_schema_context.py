@@ -64,6 +64,15 @@ class TestSchemaContext(unittest.TestCase):
         self.assertIn("SUM(QTY)", context)
         self.assertIn("SUM(ISSUEVALUE)", context)
 
+    def test_ambiguous_name_matches_require_group_by_not_blind_aggregation(self):
+        # Real failure: "keyboard stock" summed 3 different real products (KEYBOARD .W. MOUSE
+        # - COMBO, SEALED KEYBOARD FOR PT3, KEYBOARD AND MONITOR COVER) into one misleading
+        # total (0) instead of showing each item's own stock. "last supply of mouse" separately
+        # just listed raw item codes with no attempt at the actual "last supply" question.
+        context = build_schema_context()
+        self.assertIn("GROUP BY", context)
+        self.assertIn("KEYBOARD .W. MOUSE", context)
+
 
 if __name__ == "__main__":
     unittest.main()
